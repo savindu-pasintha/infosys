@@ -1,0 +1,21 @@
+{{- if .Values.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "spa-frontend.fullname" . }}
+  labels:
+    {{- include "spa-frontend.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+    - port: {{ .Values.subApp.port }}
+      targetPort: {{ .Values.subApp.port }}
+      protocol: TCP
+      name: sub-app
+  selector:
+    {{- include "spa-frontend.selectorLabels" . | nindent 4 }}
+{{- end }}
