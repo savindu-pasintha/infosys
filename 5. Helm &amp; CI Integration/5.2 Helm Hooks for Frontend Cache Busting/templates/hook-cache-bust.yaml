@@ -1,0 +1,118 @@
+# templates/hook-cache-bust.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "spa-frontend.fullname" . }}-cache-bust
+  labels:
+    {{- include "spa-frontend.labels" . | nindent 4 }}
+  annotations:
+    # This defines the hook to run after an upgrade is complete
+    "helm.sh/hook": post-upgrade
+    # Lower weight means it runs earlier in the sequence of hooks with the same type
+    "helm.sh/hook-weight": "5"
+    # Clean up the job after it completes successfully
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  template:
+    metadata:
+      name: {{ include "spa-frontend.fullname" . }}-cache-bust
+      labels:
+        {{- include "spa-frontend.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: cache-bust
+        image: "{{ .Values.hook.cacheBust.image.repository }}:{{ .Values.hook.cacheBust.image.tag }}"
+        imagePullPolicy: {{ .Values.hook.cacheBust.image.pullPolicy | default "IfNotPresent" }}
+        command:
+          - "/bin/sh"
+          - "-c"
+        args:
+          - |
+            # Determine which CDN provider to use based on values.yaml configuration
+            if [ "{{ .Values.hook.cacheBust.provider }}" = "cloudflare" ]; then
+              echo "Purging Cloudflare CDN cache for zone {{ .Values.hook.cacheBust.cloudflare.zoneId }}"
+              
+              # Call Cloudflare API to purge cache
+              curl -X POST "https://api.cloudflare.com/client/v4/zones/{{ .Values.hook.cacheBust.cloudflare.zoneId }}/purge_cache" \
+                -H "Authorization: Bearer {{ .Values.hook.cacheBust.cloudflare.apiToken }}" \
+                -H "Content-Type: application/json" \
+                --data '{"purge_everything":true}'
+              
+            elif [ "{{ .Values.hook.cacheBust.provider }}" = "aws" ]; then
+              echo "Updating AWS S3 website deployment with cache-busted filenames"
+              
+              # Option 1: Invalidate CloudFront distribution cache
+              if [ "{{ .Values.hook.cacheBust.aws.useCloudFront }}" = "true" ]; then
+                echo "Invalidating CloudFront distribution: {{ .Values.hook.cacheBust.aws.distributionId }}"
+                aws cloudfront create-invalidation \
+                  --distribution-id {{ .Values.hook.cacheBust.aws.distributionId }} \
+                  --paths "/*"
+              fi
+              
+              # Option 2: Update S3 website objects with cache-control headers
+              if [ "{{ .Values.hook.cacheBust.aws.updateS3CacheControl }}" = "true" ]; then
+                echo "Updating cache-control headers for objects in bucket {{ .Values.hook.cacheBust.aws.bucketName }}"
+                
+                # Set cache control headers for HTML files (no caching for proper version detection)
+                aws s3 cp \
+                  s3://{{ .Values.hook.cacheBust.aws.bucketName }}/index.html \
+                  s3://{{ .Values.hook.cacheBust.aws.bucketName }}/index.html \
+                  --metadata-directive REPLACE \
+                  --cache-control "no-cache, no-store, must-revalidate" \
+                  --content-type "text/html"
+                
+                # Set long cache time for assets with hashed filenames
+                aws s3 cp \
+                  s3://{{ .Values.hook.cacheBust.aws.bucketName }}/static/ \
+                  s3://{{ .Values.hook.cacheBust.aws.bucketName }}/static/ \
+                  --recursive \
+                  --metadata-directive REPLACE \
+                  --cache-control "public, max-age=31536000" \
+                  --exclude "*" \
+                  --include "*.js" \
+                  --include "*.css" \
+                  --include "*.jpg" \
+                  --include "*.png" \
+                  --include "*.svg"
+              fi
+            else
+              echo "Error: Unknown provider {{ .Values.hook.cacheBust.provider }}. Supported providers: cloudflare, aws"
+              exit 1
+            fi
+        env:
+          # Set AWS credentials if using AWS
+          {{- if eq .Values.hook.cacheBust.provider "aws" }}
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.hook.cacheBust.aws.credentialsSecret }}
+                key: access-key
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.hook.cacheBust.aws.credentialsSecret }}
+                key: secret-key
+          - name: AWS_DEFAULT_REGION
+            value: {{ .Values.hook.cacheBust.aws.region }}
+          {{- end }}
+          # Add any additional environment variables
+          {{- with .Values.hook.cacheBust.extraEnvVars }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+      {{- with .Values.hook.cacheBust.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hook.cacheBust.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hook.cacheBust.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

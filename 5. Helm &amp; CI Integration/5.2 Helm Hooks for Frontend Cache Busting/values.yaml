@@ -1,0 +1,45 @@
+# values.yaml additions for the cache busting hook
+
+hook:
+  cacheBust:
+    # Type of provider: "cloudflare" or "aws"
+    provider: "cloudflare"
+    
+    # Container image to use for the cache busting job
+    image:
+      repository: curlimages/curl
+      tag: latest
+      pullPolicy: IfNotPresent
+    
+    # Cloudflare-specific configuration
+    cloudflare:
+      # Zone ID for your domain in Cloudflare
+      zoneId: "your-cloudflare-zone-id"
+      # API token with cache purge permissions
+      # In production, use a secret instead of plaintext
+      apiToken: ""
+    
+    # AWS-specific configuration
+    aws:
+      # Region where your S3 bucket is located
+      region: "us-east-1"
+      # Name of the S3 bucket hosting your website
+      bucketName: "your-s3-bucket-name"
+      # Whether to invalidate CloudFront distribution
+      useCloudFront: true
+      # CloudFront distribution ID
+      distributionId: "your-cloudfront-distribution-id"
+      # Whether to update cache-control headers of S3 objects
+      updateS3CacheControl: true
+      # Kubernetes secret containing AWS credentials
+      credentialsSecret: "aws-credentials"
+    
+    # Additional environment variables
+    extraEnvVars: []
+    
+    # Node selector for the cache busting job
+    nodeSelector: {}
+    # Affinity settings for the cache busting job
+    affinity: {}
+    # Tolerations for the cache busting job
+    tolerations: []
